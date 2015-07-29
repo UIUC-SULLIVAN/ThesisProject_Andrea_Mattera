@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[6]:
+# In[2]:
 
 import numpy as np
 from sklearn import preprocessing 
@@ -12,6 +12,7 @@ from sklearn.svm import SVR
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.decomposition import PCA as sklearnPCA ,KernelPCA,FactorAnalysis,IncrementalPCA,FastICA
+from sklearn.manifold import Isomap,LocallyLinearEmbedding
 from scipy.stats.mstats import normaltest 
 from scipy.stats import spearmanr
 from math import *
@@ -23,8 +24,6 @@ import matplotlib.pyplot as plt
 import urllib2
 import json
 
-
-# #Classes
 
 # In[ ]:
 
@@ -38,6 +37,7 @@ class Sensor(object):
     longitude=None
     stationary=None
     def __init__(self,a,date='Captured Time'):
+        import pandas as pd
         #given a series of measurement it creates a dataframe for every day
         df=pd.DataFrame(a)
         df=df.sort('Captured Time')
@@ -229,7 +229,8 @@ class Weather(object):
     daysUnavailable=[]
     daysList=[]
     closestStation=None
-    key=0
+    key='3187b62a57755d52'
+    #key=0
     def __init__(self,lat,lon):
         '''Given latitude and longitude it find the closest weather station
         
@@ -261,14 +262,14 @@ class Weather(object):
     def clean(df):
         '''Clean a specific dataframe containing weather informations'''
         info=df.copy()
-        info=info.convert_objects(convert_numeric=True)
+        
         pre={'Light Rain':1,'Heavy Rain':1,'Rain':1,'Light Rain Mist':1,           'Heavy Rain Mist':1,'Rain Mist':1,'Light Rain Showers':1,'Heavy Rain Showers':1,           'Rain Showers':1,'Light Thunderstorms and Rain':1,'Heavy Thunderstorms and Rain':1,           'Thunderstorms and Rain':1,'Light Freezing Drizzle':1,'Heavy Freezing Drizzle':1,               'Freezing Drizzle':1,'Light Freezing Rain':1,'Heavy Freezing Rain':1,'Freezing Rain':1,         'Light Snow':1,'Heavy Snow':1,'Snow':1,'Light Snow Grains':1,'Heavy Snow Grains':1,         'Snow Grains':1,'LightSnow Showers':1,'Heavy Snow Showers':1,'Snow Showers':1,
         'Light Ice Crystals':1,'Heavy Ice Crystals':1,'Ice Crystals':1,'Light Ice Pellets':1,  \
         'Heavy Ice Pellets':1,'Ice Pellets':1,'LightIce Pellet Showers':1,'HeavyIce Pellet Showers':1,   \
         'Ice Pellet Showers':1,'LightHail Showers':1,'Heavy Hail Showers':1, \
         'Hail Showers':1,'Light Small Hail Showers':1,'Heavy Small Hail Showers':1, \
         'Small Hail Showers':1}
-        f=lambda x: pre.get(str(x) , 0)        
+        f=lambda x: pre.get(x , 0)        
         info['Conditions']=info['Conditions'].apply(f)
         
         #cleaning of NaN and other unexpected values
@@ -288,7 +289,7 @@ class Weather(object):
         h[h<0]=np.NaN
         s[s<0]=np.NaN
         d[d<0]=np.NaN
-        p[p<0]=0
+        p[p<0]=np.NaN
         info['TemperatureF']=t
         info['Humidity']=h
         info['Sea Level PressureIn']=s
@@ -342,9 +343,11 @@ class Weather(object):
     def getHistorical(self, date):
         '''Given a specific day it extract the weather information from wunderground.com
         '''
-        key=date[:10]
+        s=self.state
+        c=self.city
+        date=date[:10]
         fmt="%Y-%m-%d"
-        date=dt.datetime.strptime(key,fmt)
+        date=dt.datetime.strptime(date,fmt)
         day=date.day
         date1=date-dt.timedelta(days=1)
         date=str(date)
@@ -356,10 +359,8 @@ class Weather(object):
         df1=df1[df1['Day']==day]
         df2=df2[df2['Day']==day]
         df=df1.append(df2)
-        df=df.drop('Day',1)
-        df=Weather.clean(df)
-        self.historical[key]=df
-        self.daysList.append(key)
+        self.historical[date]=df
+        self.daysList.append(date)
         df=Weather.clean(df)
         return df
     
@@ -384,6 +385,7 @@ class Model(object):
     columns=['Captured Time','Humidity','TemperatureF','Sea Level PressureIn','Conditions','PrecipitationIn','Dew PointF','Value','Wind SpeedMPH']
         
     def __init__(self,df):
+        from sklearn import preprocessing 
         self.ModelInputs={}
         self.ModelOutput=None
         self.prediction=None
@@ -537,7 +539,6 @@ class Model(object):
         wea=w.extractHours()
         f= lambda x: x.groupby(x.Hour).median() 
         wea=wea.apply(f)
-        wea=wea.apply(lambda x: x.drop('Hour',1))
         sensor=sensor.apply(f)
         #pieces contains a list of dataframe corresponding to a single day of measurements coupled with the weater
         #dataframe with all the measurements coupled
@@ -658,7 +659,7 @@ class Model(object):
         if duringRain:
             e=e[e['Conditions']==1]
         e=e[Model.weather_columns]
-        e['Value']=self.dataset.Value.copy()
+        e['Value']=self.dataset.Value
         e=e.apply(preprocessing.scale)
         if len(e)<minimumLength:
             self.CorrelationTable=pd.DataFrame()
@@ -857,7 +858,7 @@ class Model(object):
     def prepareDataset(self,n=1,l=1,w=0):
         X=self.dataset[Model.weather_columns].copy()
         self.model_columns=Model.weather_columns[:] #this fake slicing provide a copy of the list 
-        values=self.dataset.Value.copy()
+        values=model.dataset.Value.copy()
         output=values.shift(-l).copy()
         vfield=[]
         for m in xrange(0,n+1): #the n parameter sets how much new fields should be created 
@@ -1180,8 +1181,75 @@ class ParseWeather(object):
             tmp['DateUTC']=date
             tmp.index=[hour]
             l.append(tmp)
+            newdate=date[:10]
         df=pd.concat(l) #all the weather info are concatenated in a single dataframe
         df=df.convert_objects(convert_dates='coerce')
         return df
     
+
+
+# In[ ]:
+
+p=pd.read_csv('Stationary_data_with_weather.csv')
+colnames=['Latitude', 'Longitude', 'Value', 'ID', 'Height',
+       'Loader ID','Sensor', 'Distance',
+      'TemperatureF', 'Dew PointF', 'Humidity', 'Sea Level PressureIn',
+       'VisibilityMPH', 'Wind SpeedMPH', 'PrecipitationIn', 'Conditions',
+       'WindDirDegrees', 'Captured Time']
+p.columns=colnames
+
+
+# In[ ]:
+
+#r=p[p.Sensor==1721]
+params={}
+bestinput='Dataset'
+percentage=50
+start=time.time()
+li=p.Sensor.unique()
+li.sort()
+for n in li:
+    print(n)
+    model=None
+    r=p[p.Sensor==n]
+    if len(r)<500:
+        continue
+        
+    model=Model(r)
+    model=model.remove_outliers()
+    model=model.prepareDataset(n=4,w=0,l=1)
+    model=model.getInput()
+    model=model.getOutput()
+    if bestinput!='Dataset':
+        model=model.reduceDataset(method=bestinput,nr=10)
+    model=model.applyOnInputs(inp=bestinput,method='standardize',percentage=percentage)
+    model=model.applyOnOutput(method='movingaverage',window=4)
+    model=model.applyOnOutput(method='standardize',percentage=percentage)
+
+    X=model.ModelInputs[bestinput] #input dataset
+    samples=int(percentage*len(X)/100) #evaluating the samples number given the percentage
+    x=X[:samples,0:] #training input set
+    y = model.ModelOutput[:samples] #training output set
+    test_x=X[samples:,:] #testing input set
+    test_y=model.ModelOutput[samples:]
+    scores = ['precision', 'recall']
+
+    svr = GridSearchCV(SVR(),
+                       param_grid={"C": 2**np.arange(1,14),
+                                   "gamma": np.logspace(-2, 2, 10),
+                                    "epsilon" : [0, 0.01, 0.1, 0.5]})
+    svr.fit(x, y)
+    params[n]=svr.best_params_
+
+print str(time.time()-start) + 's to complete the evaluation of the best parameters'
+
+
+# In[4]:
+
+2**np.arange(1,14)
+
+
+# In[6]:
+
+list(np.logspace(-2, 2, 10))
 
